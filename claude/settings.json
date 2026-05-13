@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "skipDangerousModePermissionPrompt": true,
+  "autoMemoryEnabled": false,
+  "env": {
+    "CLAUDE_CODE_DISABLE_1M_CONTEXT": "1"
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash /home/dev/.claude/statusline-command.sh"
+  }
+}
