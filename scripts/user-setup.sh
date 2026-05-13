@@ -174,9 +174,14 @@ if [ -f "$HOME/.cargo/env" ]; then
   set -u
 fi
 
-# just (compiled via cargo; cargo must already be on PATH from rustup)
-if command -v cargo >/dev/null 2>&1 && ! command -v just >/dev/null 2>&1; then
-  cargo install just || echo "WARN: just install failed"
+# just (prebuilt binary — skips the multi-minute cargo build).
+# just.systems/install.sh drops a single static binary into --to. We use
+# ~/.local/bin which is already on PATH from the zshrc wiring above.
+if ! command -v just >/dev/null 2>&1; then
+  mkdir -p "$HOME/.local/bin"
+  curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh \
+    | bash -s -- --to "$HOME/.local/bin" \
+    || echo "WARN: just install failed"
 fi
 
 echo "=== tech-stack finished: $(date -uIs) ==="

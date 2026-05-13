@@ -1,10 +1,14 @@
 base:
-  # _images/ubuntu-lts is the image-only template: ships the disk image
+  # _images/debian is the image-only template: ships the disk image
   # without the _default/mounts inheritance that auto-mounts the host
   # home read-only at the same path. Avoids exposing the entire host
   # home to the guest — agents inside the VM can only reach what is
   # explicitly listed under `mounts:` below.
-  - template:_images/ubuntu-lts
+  # Debian over Ubuntu LTS: no snapd, no unattended-upgrades, leaner
+  # cloud-init. Same apt ecosystem so scripts/system-deps.sh is unchanged
+  # in spirit. glibc, so Bun / Claude native installer / sdkman tarballs
+  # all work without compat shims.
+  - template:_images/debian
 
 # Sized for the claude native installer, which allocates ~3.5 GiB RSS
 # (Bun mmaps a large heap). 4 GiB + 0 swap OOM-killed it during provisioning.
