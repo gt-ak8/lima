@@ -4,6 +4,7 @@
   },
   "skipDangerousModePermissionPrompt": true,
   "autoMemoryEnabled": false,
+  "awaySummaryEnabled": false,
   "env": {
     "CLAUDE_CODE_DISABLE_1M_CONTEXT": "1"
   },
