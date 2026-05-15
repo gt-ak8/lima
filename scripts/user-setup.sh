@@ -21,10 +21,11 @@ chmod 600 ~/.ssh/known_hosts
 # (cc-dev.yaml: forwardAgent: true): the VM never holds the private key on
 # disk; ssh-agent on the host signs each commit. The `key::` prefix tells
 # git the literal pubkey follows (no on-disk key file lookup needed).
-git config --global user.name        "Guillaume Taffin"
-git config --global user.email       "guillaume.taffin@akur8.com"
+# Values come from cc-dev.yaml `param:` block (sourced from host .env).
+git config --global user.name        "${PARAM_GIT_NAME}"
+git config --global user.email       "${PARAM_GIT_EMAIL}"
 git config --global gpg.format       ssh
-git config --global user.signingkey  "key::ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKn7BHFrSTZYxo4s4X2iofjlVR0hXKcuk1DWfpTgpYWO guillaume.taffin@akur8.com"
+git config --global user.signingkey  "${PARAM_GIT_SIGNING_KEY}"
 git config --global commit.gpgsign   true
 git config --global tag.gpgsign      true
 
@@ -174,7 +175,13 @@ if [ -f "$HOME/.cargo/env" ]; then
   set -u
 fi
 
-# just (prebuilt binary — skips the multi-minute cargo build).
+# worktrunk (git worktree manager for parallel AI agents). Built from
+# crates.io via cargo; binary is `wt`. Skipped if already installed.
+if ! command -v wt >/dev/null 2>&1 && [ -x "$HOME/.cargo/bin/cargo" ]; then
+  "$HOME/.cargo/bin/cargo" install worktrunk || echo "WARN: worktrunk install failed"
+fi
+
+# just (prebuilt binary, skips the multi-minute cargo build).
 # just.systems/install.sh drops a single static binary into --to. We use
 # ~/.local/bin which is already on PATH from the zshrc wiring above.
 if ! command -v just >/dev/null 2>&1; then

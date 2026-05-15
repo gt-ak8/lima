@@ -2,13 +2,24 @@ base:
   # _images/debian is the image-only template: ships the disk image
   # without the _default/mounts inheritance that auto-mounts the host
   # home read-only at the same path. Avoids exposing the entire host
-  # home to the guest — agents inside the VM can only reach what is
+  # home to the guest, agents inside the VM can only reach what is
   # explicitly listed under `mounts:` below.
   # Debian over Ubuntu LTS: no snapd, no unattended-upgrades, leaner
   # cloud-init. Same apt ecosystem so scripts/system-deps.sh is unchanged
   # in spirit. glibc, so Bun / Claude native installer / sdkman tarballs
   # all work without compat shims.
   - template:_images/debian
+
+# User-specific values, supplied at `limactl start` time via the justfile
+# (which sources .env). Empty defaults so the file is publishable; the
+# justfile validates non-empty before invoking limactl.
+# Values are exposed to provision scripts as PARAM_<key> env vars and
+# can be referenced in this yaml via Go-template .Param.<key>.
+param:
+  GIT_NAME: ""
+  GIT_EMAIL: ""
+  GIT_SIGNING_KEY: ""
+  HOST_PATH: ""
 
 # Sized for the claude native installer, which allocates ~3.5 GiB RSS
 # (Bun mmaps a large heap). 4 GiB + 0 swap OOM-killed it during provisioning.
@@ -30,8 +41,8 @@ ssh:
 mounts:
   # Mirror the host path inside the guest so absolute paths (logs, tool
   # output, IDE jumps) resolve identically on both sides.
-  - location: "/Users/guillaume.taffin/dev/projects"
-    mountPoint: "/Users/guillaume.taffin/dev/projects"
+  - location: "{{ .Param.HOST_PATH }}"
+    mountPoint: "{{ .Param.HOST_PATH }}"
     writable: true
 mountType: "virtiofs"
 
