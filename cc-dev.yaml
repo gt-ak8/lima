@@ -8,7 +8,7 @@ base:
   # cloud-init. Same apt ecosystem so scripts/system-deps.sh is unchanged
   # in spirit. glibc, so Bun / Claude native installer / sdkman tarballs
   # all work without compat shims.
-  - template:_images/debian
+  - template:_images/debian-12
 
 # User-specific values, supplied at `limactl start` time via the justfile
 # (which sources .env). Empty defaults so the file is publishable; the
