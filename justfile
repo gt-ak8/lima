@@ -10,7 +10,11 @@ start:
     @[ -n "${GIT_NAME:-}" ]         || { echo "ERROR: GIT_NAME not set"; exit 1; }
     @[ -n "${GIT_EMAIL:-}" ]        || { echo "ERROR: GIT_EMAIL not set"; exit 1; }
     @[ -n "${GIT_SIGNING_KEY:-}" ]  || { echo "ERROR: GIT_SIGNING_KEY not set"; exit 1; }
-    limactl start --name=cc-dev cc-dev.yaml --set '.param.HOST_PATH = strenv(HOST_PATH) | .param.GIT_NAME = strenv(GIT_NAME) | .param.GIT_EMAIL = strenv(GIT_EMAIL) | .param.GIT_SIGNING_KEY = strenv(GIT_SIGNING_KEY)'
+    limactl start --name=cc-dev cc-dev.yaml \
+      --set ".param.HOST_PATH = \"$HOST_PATH\"" \
+      --set ".param.GIT_NAME = \"$GIT_NAME\"" \
+      --set ".param.GIT_EMAIL = \"$GIT_EMAIL\"" \
+      --set ".param.GIT_SIGNING_KEY = \"$GIT_SIGNING_KEY\""
 
 # Stop the VM.
 stop:
