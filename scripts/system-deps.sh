@@ -26,13 +26,23 @@ apt-get install -y \
   fd-find \
   build-essential \
   jq \
-  gh
+  gh \
+  gnome-keyring \
+  libsecret-1-0 \
+  dbus-user-session
 
 # Debian (like Ubuntu) ships fd as `fdfind` to avoid a name clash; expose it as `fd`.
 ln -sf /usr/bin/fdfind /usr/local/bin/fd
 
 # Set zsh as default shell for dev user
 chsh -s /usr/bin/zsh dev
+
+# Linger keeps user@1000.service (and its dbus user bus) alive across SSH
+# sessions. Required so the gnome-keyring user unit installed by
+# user-setup.sh has a live user manager to register against, and so
+# keytar-based CLIs (dust, etc.) find a running Secret Service on every
+# new SSH login rather than only inside an interactive session.
+loginctl enable-linger dev
 
 # Trim boot-time services we never use. Cuts seconds off every restart and
 # avoids periodic apt/man-db churn that competes with shell startup.

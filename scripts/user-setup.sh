@@ -59,6 +59,39 @@ fi
 export SSH_AUTH_SOCK="$HOME/.ssh/agent.sock"
 AGENTSOCK
 
+# --- secret service (gnome-keyring, headless) ----------------------------
+# keytar-based CLIs (dust, vscode-cli, ...) need a running Secret Service
+# on the user's dbus bus. The VM is headless and dev logs in via SSH key,
+# so pam_gnome_keyring never gets a password to unlock with. We run
+# gnome-keyring-daemon as a user systemd unit and unlock at startup with
+# an empty password: same security as a flat on-disk file, but speaks
+# org.freedesktop.secrets so keytar clients work.
+#
+# `--components=secrets` deliberately excludes the ssh-agent component;
+# otherwise gnome-keyring would hijack SSH_AUTH_SOCK and break the
+# forwarded host SSH agent used for commit signing (see block above).
+mkdir -p "$HOME/.config/systemd/user"
+cat >"$HOME/.config/systemd/user/gnome-keyring-daemon.service" <<'KEYUNIT'
+[Unit]
+Description=GNOME Keyring daemon (secrets only, headless unlock)
+
+[Service]
+Type=simple
+ExecStart=/bin/sh -c 'printf "" | exec /usr/bin/gnome-keyring-daemon --foreground --components=secrets --unlock'
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+KEYUNIT
+
+# enable-linger ran in system-deps.sh, so user@1000.service should already
+# be up at this point. `|| true` keeps provisioning resilient if the user
+# manager isn't reachable on first boot: the symlinks land in the WantedBy
+# dir anyway and activate on next SSH login.
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+systemctl --user daemon-reload || true
+systemctl --user enable --now gnome-keyring-daemon.service || true
+
 # --- bash safety net -----------------------------------------------------
 # `limactl shell` and even plain ssh can land in bash (e.g. when a stale
 # ssh ControlMaster cached the pre-chsh shell). Bash login shells read
@@ -135,6 +168,13 @@ if [ -s "$NVM_DIR/nvm.sh" ]; then
   . "$NVM_DIR/nvm.sh"
   nvm install --lts || echo "WARN: node LTS install failed"
   nvm alias default 'lts/*' || true
+  # Global npm CLIs that need node. Installed under the active nvm prefix
+  # so they follow node LTS upgrades. dust uses gnome-keyring set up in
+  # system-deps.sh / the user systemd unit above; copilot uses gh auth.
+  if command -v npm >/dev/null 2>&1; then
+    npm install -g @dust-tt/dust-cli || echo "WARN: dust-cli install failed"
+    npm install -g @github/copilot   || echo "WARN: copilot cli install failed"
+  fi
   set -u
 fi
 
