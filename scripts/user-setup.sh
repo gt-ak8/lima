@@ -160,6 +160,10 @@ grep -q 'BUN_INSTALL' ~/.zshrc || cat >>~/.zshrc <<'BUNRC'
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
 BUNRC
+grep -q 'PNPM_HOME' ~/.zshrc || cat >>~/.zshrc <<'PNPMRC'
+export PNPM_HOME="$HOME/.local/share/pnpm"
+case ":$PATH:" in *":$PNPM_HOME:"*) ;; *) export PATH="$PNPM_HOME:$PATH" ;; esac
+PNPMRC
 grep -q 'NVM_DIR' ~/.zshrc || cat >>~/.zshrc <<'NVMRC'
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
@@ -183,6 +187,12 @@ echo "=== tech-stack started: $(date -uIs) ==="
 # bun
 if [ ! -x "$HOME/.bun/bin/bun" ]; then
   curl -fsSL https://bun.sh/install | bash || echo "WARN: bun install failed"
+fi
+
+# pnpm (standalone install; sets PNPM_HOME=$HOME/.local/share/pnpm)
+if [ ! -x "$HOME/.local/share/pnpm/pnpm" ]; then
+  curl -fsSL https://get.pnpm.io/install.sh | ENV="$HOME/.zshrc" SHELL="$(command -v zsh)" bash \
+    || echo "WARN: pnpm install failed"
 fi
 
 # nvm + node LTS
