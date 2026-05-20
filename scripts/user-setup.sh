@@ -70,6 +70,34 @@ AGENTSOCK
 # `--components=secrets` deliberately excludes the ssh-agent component;
 # otherwise gnome-keyring would hijack SSH_AUTH_SOCK and break the
 # forwarded host SSH agent used for commit signing (see block above).
+#
+# Bootstrap the `login` keyring file BEFORE starting the unit. `--unlock`
+# only opens an existing file; it does NOT create one. On a fresh user
+# the file is missing, so the daemon comes up with zero collections and
+# keytar clients (dust) hit `Object does not exist at path
+# /collection/login` the first time they try to store a token. The
+# Secret Service API path that would normally create it (CreateCollection)
+# triggers a graphical password prompt which a headless VM has no way to
+# answer, so we write the file directly in gnome-keyring's plain-INI
+# empty-password format. The daemon picks it up on --unlock and exposes
+# it at /org/freedesktop/secrets/collection/login.
+mkdir -p "$HOME/.local/share/keyrings"
+chmod 700 "$HOME/.local/share/keyrings"
+if [ ! -f "$HOME/.local/share/keyrings/login.keyring" ]; then
+  NOW=$(date +%s)
+  cat >"$HOME/.local/share/keyrings/login.keyring" <<KEYRING
+[keyring]
+display-name=login
+ctime=$NOW
+mtime=$NOW
+lock-on-idle=false
+lock-after=false
+KEYRING
+  chmod 600 "$HOME/.local/share/keyrings/login.keyring"
+  printf 'login' >"$HOME/.local/share/keyrings/default"
+  chmod 600 "$HOME/.local/share/keyrings/default"
+fi
+
 mkdir -p "$HOME/.config/systemd/user"
 cat >"$HOME/.config/systemd/user/gnome-keyring-daemon.service" <<'KEYUNIT'
 [Unit]
