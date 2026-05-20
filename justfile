@@ -15,6 +15,7 @@ start:
       --set ".param.GIT_NAME = \"$GIT_NAME\"" \
       --set ".param.GIT_EMAIL = \"$GIT_EMAIL\"" \
       --set ".param.GIT_SIGNING_KEY = \"$GIT_SIGNING_KEY\""
+    just sync-claude
 
 # Stop the VM.
 stop:
