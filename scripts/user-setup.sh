@@ -269,6 +269,15 @@ if ! command -v just >/dev/null 2>&1; then
     || echo "WARN: just install failed"
 fi
 
+# uv (Python package/project manager, prebuilt binary). Installer drops
+# uv/uvx into ~/.local/bin (already on PATH). --no-modify-path keeps the
+# installer from appending its own PATH line to ~/.zshrc.
+if ! command -v uv >/dev/null 2>&1; then
+  curl -LsSf https://astral.sh/uv/install.sh \
+    | env UV_INSTALL_DIR="$HOME/.local/bin" INSTALLER_NO_MODIFY_PATH=1 sh \
+    || echo "WARN: uv install failed"
+fi
+
 echo "=== tech-stack finished: $(date -uIs) ==="
 touch "$HOME/.tech-stack.done"
 TECH
