@@ -73,4 +73,6 @@ if ! swapon --show | grep -q .; then
 fi
 
 # Install starship (system-wide binary)
-curl -fsSL https://starship.rs/install.sh | sh -s -- --yes
+if ! command -v starship >/dev/null 2>&1; then
+  curl -fsSL https://starship.rs/install.sh | sh -s -- --yes
+fi

@@ -31,8 +31,11 @@ git config --global tag.gpgsign      true
 
 # --- claude code ---------------------------------------------------------
 # Best-effort: the native installer can OOM on small VMs; never let it
-# abort the rest of the script.
-curl -fsSL https://claude.ai/install.sh | bash || echo "WARN: claude install failed, skipping"
+# abort the rest of the script. Skip if already installed (provision
+# scripts re-run on every `limactl start`).
+if ! command -v claude >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/claude" ]; then
+  curl -fsSL https://claude.ai/install.sh | bash || echo "WARN: claude install failed, skipping"
+fi
 
 # --- zsh config ----------------------------------------------------------
 touch ~/.zshrc
@@ -204,14 +207,16 @@ fi
 if [ -s "$NVM_DIR/nvm.sh" ]; then
   set +u
   . "$NVM_DIR/nvm.sh"
-  nvm install --lts || echo "WARN: node LTS install failed"
-  nvm alias default 'lts/*' || true
+  if [ -z "$(ls "$NVM_DIR/versions/node" 2>/dev/null)" ]; then
+    nvm install --lts || echo "WARN: node LTS install failed"
+    nvm alias default 'lts/*' || true
+  fi
   # Global npm CLIs that need node. Installed under the active nvm prefix
   # so they follow node LTS upgrades. dust uses gnome-keyring set up in
   # system-deps.sh / the user systemd unit above; copilot uses gh auth.
   if command -v npm >/dev/null 2>&1; then
-    npm install -g @dust-tt/dust-cli || echo "WARN: dust-cli install failed"
-    npm install -g @github/copilot   || echo "WARN: copilot cli install failed"
+    command -v dust    >/dev/null 2>&1 || npm install -g @dust-tt/dust-cli || echo "WARN: dust-cli install failed"
+    command -v copilot >/dev/null 2>&1 || npm install -g @github/copilot   || echo "WARN: copilot cli install failed"
   fi
   set -u
 fi
@@ -228,16 +233,22 @@ if [ -s "$SDKMAN_DIR/bin/sdkman-init.sh" ]; then
     || echo 'sdkman_auto_answer=true' >>"$SDKMAN_DIR/etc/config"
   set +u
   . "$SDKMAN_DIR/bin/sdkman-init.sh"
-  JAVA_ID=$(sdk list java 2>/dev/null \
-    | grep -oE '25(\.[0-9]+){0,3}-tem\b' | sort -V | tail -1)
-  sdk install java "${JAVA_ID:-25-tem}" </dev/null \
-    || echo "WARN: java 25 install failed"
-  sdk install gradle </dev/null \
-    || echo "WARN: gradle install failed"
-  MAVEN_ID=$(sdk list maven 2>/dev/null \
-    | grep -oE '\b3\.[0-9]+\.[0-9]+\b' | sort -V | tail -1)
-  sdk install maven "${MAVEN_ID:-3.9.11}" </dev/null \
-    || echo "WARN: maven install failed"
+  if [ ! -d "$SDKMAN_DIR/candidates/java/current" ]; then
+    JAVA_ID=$(sdk list java 2>/dev/null \
+      | grep -oE '25(\.[0-9]+){0,3}-tem\b' | sort -V | tail -1)
+    sdk install java "${JAVA_ID:-25-tem}" </dev/null \
+      || echo "WARN: java 25 install failed"
+  fi
+  if [ ! -d "$SDKMAN_DIR/candidates/gradle/current" ]; then
+    sdk install gradle </dev/null \
+      || echo "WARN: gradle install failed"
+  fi
+  if [ ! -d "$SDKMAN_DIR/candidates/maven/current" ]; then
+    MAVEN_ID=$(sdk list maven 2>/dev/null \
+      | grep -oE '\b3\.[0-9]+\.[0-9]+\b' | sort -V | tail -1)
+    sdk install maven "${MAVEN_ID:-3.9.11}" </dev/null \
+      || echo "WARN: maven install failed"
+  fi
   set -u
 fi
 
