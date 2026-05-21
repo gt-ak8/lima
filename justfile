@@ -6,15 +6,19 @@ default:
 
 # Create or start the cc-dev VM (sources .env, forwards values to Lima).
 start:
-    @[ -n "${HOST_PATH:-}" ]        || { echo "ERROR: HOST_PATH not set (copy .env.example to .env)"; exit 1; }
-    @[ -n "${GIT_NAME:-}" ]         || { echo "ERROR: GIT_NAME not set"; exit 1; }
-    @[ -n "${GIT_EMAIL:-}" ]        || { echo "ERROR: GIT_EMAIL not set"; exit 1; }
-    @[ -n "${GIT_SIGNING_KEY:-}" ]  || { echo "ERROR: GIT_SIGNING_KEY not set"; exit 1; }
-    limactl start --name=cc-dev cc-dev.yaml \
-      --set ".param.HOST_PATH = \"$HOST_PATH\"" \
-      --set ".param.GIT_NAME = \"$GIT_NAME\"" \
-      --set ".param.GIT_EMAIL = \"$GIT_EMAIL\"" \
-      --set ".param.GIT_SIGNING_KEY = \"$GIT_SIGNING_KEY\""
+    @if [ -n "$(limactl list -q cc-dev 2>/dev/null)" ]; then \
+      limactl start cc-dev; \
+    else \
+      [ -n "${HOST_PATH:-}" ]        || { echo "ERROR: HOST_PATH not set (copy .env.example to .env)"; exit 1; }; \
+      [ -n "${GIT_NAME:-}" ]         || { echo "ERROR: GIT_NAME not set"; exit 1; }; \
+      [ -n "${GIT_EMAIL:-}" ]        || { echo "ERROR: GIT_EMAIL not set"; exit 1; }; \
+      [ -n "${GIT_SIGNING_KEY:-}" ]  || { echo "ERROR: GIT_SIGNING_KEY not set"; exit 1; }; \
+      limactl start --name=cc-dev cc-dev.yaml \
+        --set ".param.HOST_PATH = \"$HOST_PATH\"" \
+        --set ".param.GIT_NAME = \"$GIT_NAME\"" \
+        --set ".param.GIT_EMAIL = \"$GIT_EMAIL\"" \
+        --set ".param.GIT_SIGNING_KEY = \"$GIT_SIGNING_KEY\""; \
+    fi
     just sync-claude
 
 # Stop the VM.
