@@ -1,33 +1,11 @@
 #!/bin/bash
-# Run with -u/-x for visibility, but NOT -e: a single non-fatal failure
-# (e.g. OOM during a network installer) must not abort the rest of the
-# user-level setup, otherwise zsh/starship/safety-net never get applied
-# and the user lands in a half-configured bash on next login.
+# cc-dev user-mode add-ons (runs AFTER base/user-provision.sh).
+# Installs Claude Code, sets up the headless gnome-keyring user unit, wires
+# tech-stack rc lines, then stages the async tech-stack installer.
+#
+# NOT -e: a single failure (e.g. claude OOM, npm hiccup) must not abort the
+# rest of the setup.
 set -ux
-
-# --- shell ---------------------------------------------------------------
-# Set zsh as login shell for current user
-sudo usermod -s /usr/bin/zsh "$USER" || true
-
-# --- ssh known_hosts -----------------------------------------------------
-mkdir -p ~/.ssh
-chmod 700 ~/.ssh
-ssh-keyscan -t rsa,ecdsa,ed25519 github.com ssh.github.com >>~/.ssh/known_hosts 2>/dev/null || true
-sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts || true
-chmod 600 ~/.ssh/known_hosts
-
-# --- git config ----------------------------------------------------------
-# Identity + SSH commit signing. Signing relies on the forwarded SSH agent
-# (cc-dev.yaml: forwardAgent: true): the VM never holds the private key on
-# disk; ssh-agent on the host signs each commit. The `key::` prefix tells
-# git the literal pubkey follows (no on-disk key file lookup needed).
-# Values come from cc-dev.yaml `param:` block (sourced from host .env).
-git config --global user.name        "${PARAM_GIT_NAME}"
-git config --global user.email       "${PARAM_GIT_EMAIL}"
-git config --global gpg.format       ssh
-git config --global user.signingkey  "${PARAM_GIT_SIGNING_KEY}"
-git config --global commit.gpgsign   true
-git config --global tag.gpgsign      true
 
 # --- claude code ---------------------------------------------------------
 # Best-effort: the native installer can OOM on small VMs; never let it
@@ -36,31 +14,6 @@ git config --global tag.gpgsign      true
 if ! command -v claude >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/claude" ]; then
   curl -fsSL https://claude.ai/install.sh | bash || echo "WARN: claude install failed, skipping"
 fi
-
-# --- zsh config ----------------------------------------------------------
-touch ~/.zshrc
-grep -q '.local/bin' ~/.zshrc || echo 'export PATH="$HOME/.local/bin:$PATH"' >>~/.zshrc
-# TERM fallback: hosts like ghostty/wezterm/kitty forward an exotic $TERM
-# the guest does not have terminfo for, breaking backspace, `clear`, colors.
-grep -q 'TERM fallback' ~/.zshrc || cat >>~/.zshrc <<'ZRC'
-# TERM fallback
-[ -n "$TERM" ] && ! infocmp "$TERM" >/dev/null 2>&1 && export TERM=xterm-256color
-ZRC
-grep -q 'starship init' ~/.zshrc || echo 'eval "$(starship init zsh)"' >>~/.zshrc
-
-# SSH agent socket stabilizer. Zed's remote SSH terminal does NOT inherit
-# SSH_AUTH_SOCK from the editor's ssh connection (zed#29438), and tmux
-# freezes the value at first attach. Real `ssh lima-cc-dev` logins refresh
-# ~/.ssh/agent.sock to point at the live forwarded socket; every other
-# shell reads that stable path instead of a stale per-session one.
-mkdir -p ~/.ssh && chmod 700 ~/.ssh
-grep -q 'agent.sock' ~/.zshrc || cat >>~/.zshrc <<'AGENTSOCK'
-if [ -n "$SSH_AUTH_SOCK" ] && [ -S "$SSH_AUTH_SOCK" ] \
-   && [ "$SSH_AUTH_SOCK" != "$HOME/.ssh/agent.sock" ]; then
-  ln -sf "$SSH_AUTH_SOCK" "$HOME/.ssh/agent.sock"
-fi
-export SSH_AUTH_SOCK="$HOME/.ssh/agent.sock"
-AGENTSOCK
 
 # --- secret service (gnome-keyring, headless) ----------------------------
 # keytar-based CLIs (dust, vscode-cli, ...) need a running Secret Service
@@ -72,7 +25,7 @@ AGENTSOCK
 #
 # `--components=secrets` deliberately excludes the ssh-agent component;
 # otherwise gnome-keyring would hijack SSH_AUTH_SOCK and break the
-# forwarded host SSH agent used for commit signing (see block above).
+# forwarded host SSH agent used for commit signing.
 #
 # Bootstrap the `login` keyring file BEFORE starting the unit. `--unlock`
 # only opens an existing file; it does NOT create one. On a fresh user
@@ -82,8 +35,7 @@ AGENTSOCK
 # Secret Service API path that would normally create it (CreateCollection)
 # triggers a graphical password prompt which a headless VM has no way to
 # answer, so we write the file directly in gnome-keyring's plain-INI
-# empty-password format. The daemon picks it up on --unlock and exposes
-# it at /org/freedesktop/secrets/collection/login.
+# empty-password format.
 mkdir -p "$HOME/.local/share/keyrings"
 chmod 700 "$HOME/.local/share/keyrings"
 if [ ! -f "$HOME/.local/share/keyrings/login.keyring" ]; then
@@ -115,28 +67,12 @@ Restart=on-failure
 WantedBy=default.target
 KEYUNIT
 
-# enable-linger ran in system-deps.sh, so user@1000.service should already
-# be up at this point. `|| true` keeps provisioning resilient if the user
-# manager isn't reachable on first boot: the symlinks land in the WantedBy
-# dir anyway and activate on next SSH login.
+# enable-linger ran in dev-system-deps.sh, so user@1000.service should
+# already be up. `|| true` keeps provisioning resilient if the user
+# manager isn't reachable on first boot.
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 systemctl --user daemon-reload || true
 systemctl --user enable --now gnome-keyring-daemon.service || true
-
-# --- bash safety net -----------------------------------------------------
-# `limactl shell` and even plain ssh can land in bash (e.g. when a stale
-# ssh ControlMaster cached the pre-chsh shell). Bash login shells read
-# ~/.bash_profile (or ~/.profile) but NOT ~/.bashrc, and Lima rewrites
-# ~/.profile to a PATH-only stub that does not source ~/.bashrc, so the
-# jump must live in ~/.bash_profile.
-touch ~/.bash_profile
-grep -q 'exec zsh' ~/.bash_profile || cat >>~/.bash_profile <<'PROF'
-[ -f ~/.profile ] && . ~/.profile
-[ -f ~/.bashrc ]  && . ~/.bashrc
-# TERM fallback (see ~/.zshrc for rationale)
-[ -n "$TERM" ] && ! infocmp "$TERM" >/dev/null 2>&1 && export TERM=xterm-256color
-case $- in *i*) [ -z "$ZSH_VERSION" ] && exec zsh -l ;; esac
-PROF
 
 # =========================================================================
 # Tech stack — keep this as the LAST section.
@@ -212,8 +148,8 @@ if [ -s "$NVM_DIR/nvm.sh" ]; then
     nvm alias default 'lts/*' || true
   fi
   # Global npm CLIs that need node. Installed under the active nvm prefix
-  # so they follow node LTS upgrades. dust uses gnome-keyring set up in
-  # system-deps.sh / the user systemd unit above; copilot uses gh auth.
+  # so they follow node LTS upgrades. dust uses gnome-keyring set up above;
+  # copilot uses gh auth.
   if command -v npm >/dev/null 2>&1; then
     command -v dust    >/dev/null 2>&1 || npm install -g @dust-tt/dust-cli || echo "WARN: dust-cli install failed"
     command -v copilot >/dev/null 2>&1 || npm install -g @github/copilot   || echo "WARN: copilot cli install failed"

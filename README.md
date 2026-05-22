@@ -1,81 +1,116 @@
-# cc-dev — Lima VM for Claude Code
+# lima — multi-VM Claude / agent setup
 
 ## Overview
 
-Debian 12 Lima VM preconfigured for [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) with an async tech-stack installer (bun, node/nvm, java/gradle/maven via sdkman, rust + just) and a synced `~/.claude/` config.
+Lima-based fleet of Debian 12 VMs for Claude Code and scoped agent sandboxes.
+A shared base template provides the common CLI toolkit; each VM extends it with
+its own tools, mounts, and credentials.
 
-Key design points:
-- 8 GiB RAM + 4 GiB swap (Claude native installer allocates ~3.5 GiB RSS; 4 GiB OOM-killed it).
-- Debian base (no snapd, no unattended-upgrades, leaner cloud-init than Ubuntu LTS).
-- Boot-time service disables (apt-daily, man-db, motd-news, fwupd, networkd-wait-online, etc.) to shave seconds off every restart.
-- virtiofs mount of a host project dir at the same absolute path inside the guest (so paths resolve identically on both sides).
-- SSH host port pinned to `2222` so `ssh lima-cc-dev` stays stable across restarts.
-- Tech-stack install staged as a transient systemd unit (`lima-tech-stack`) to outlive cloud-init's ~10 min boot-script timeout.
+Refs: [Lima](https://lima-vm.io/) · [Lima provisioning](https://lima-vm.io/docs/config/provision/) · [Claude Code](https://docs.claude.com/en/docs/claude-code/overview).
 
-Refs: [Lima](https://lima-vm.io/) · [Lima provisioning](https://lima-vm.io/docs/config/provision/) · [Claude Code settings](https://docs.claude.com/en/docs/claude-code/settings).
+## Layout
+
+```
+.
+├── base/
+│   ├── base.yaml             # shared Lima template (inherits _images/debian-12)
+│   ├── provision.sh          # system: apt CLI toolkit, gh, fd, zsh, swap, starship
+│   └── user-provision.sh     # user: known_hosts, git identity, base rc wiring
+├── vms/
+│   └── cc-dev/               # one folder per VM, folder name = VM name
+│       ├── vm.yaml           # `base: [../../base/base.yaml]` + VM-specific overrides
+│       ├── scripts/          # VM-specific provisioning
+│       ├── claude/           # optional: synced into guest ~/.claude/ on start
+│       ├── .env.example      # declares required PARAM_* keys
+│       └── .env              # gitignored, user-supplied values
+└── justfile                  # generic recipes take the VM name as arg
+```
+
+Lima merges `provision:` lists by **prepending** base entries, so the run
+order is: `base/provision.sh` → `vms/<vm>/scripts/*-deps.sh` (system) →
+`base/user-provision.sh` → `vms/<vm>/scripts/*-setup.sh` (user).
 
 ## Prerequisites
 
-- `lima` installed: [install guide](https://lima-vm.io/docs/installation/).
-- `just` installed: [install guide](https://github.com/casey/just#installation).
-- A host directory to mount into the VM (set via `HOST_PATH` in `.env`; mirrored to the same absolute path inside the guest).
-
-## Setup
-
-```bash
-cp .env.example .env
-# edit .env: HOST_PATH, GIT_NAME, GIT_EMAIL, GIT_SIGNING_KEY
-just start
-```
-
-`just` loads `.env` and forwards values to Lima as `param:` entries (see [`cc-dev.yaml`](./cc-dev.yaml)), which are exposed to provision scripts as `PARAM_<key>` env vars and substituted into the yaml via `{{ .Param.<key> }}`. `.env` is gitignored so the repo stays publishable.
-
-## Directory layout
-
-| File | Purpose |
-|------|---------|
-| [`justfile`](./justfile) | Entry point: `just start / stop / delete / recreate / shell / sync-claude / tech-stack-log / tech-stack-status`. Loads `.env` via `set dotenv-load`. |
-| [`.env.example`](./.env.example) | Template for `.env` (gitignored): host mount path + git identity + SSH signing pubkey. |
-| [`cc-dev.yaml`](./cc-dev.yaml) | Lima VM spec: base image, memory, user, SSH, mount, provision hooks, `param:` block. |
-| [`scripts/system-deps.sh`](./scripts/system-deps.sh) | Root provisioning: apt deps + gh CLI in a single update pass, `fdfind`->`fd` symlink, zsh as dev's default, boot-time service disables, 4 GiB swap, starship. |
-| [`scripts/user-setup.sh`](./scripts/user-setup.sh) | User provisioning: known_hosts seed, git identity + SSH commit signing (from `PARAM_*`), Claude Code install, zsh/bash rc wiring, then stages the async tech-stack installer as a transient systemd unit. Watch with `tail -f ~/.tech-stack.log`; done marker is `~/.tech-stack.done`. |
-| [`scripts/sync-claude-config.sh`](./scripts/sync-claude-config.sh) | Pushes `claude/*` into the VM's `~/.claude/`. `settings.json` uses no-clobber semantics so VM-side tweaks (e.g. `/effort`) survive; pass `--force` to overwrite. |
-| [`claude/CLAUDE.md`](./claude/CLAUDE.md) | Global Claude Code instructions inside the VM. |
-| [`claude/settings.json`](./claude/settings.json) | Claude Code [settings](https://docs.claude.com/en/docs/claude-code/settings): bypass-permissions default mode, disable 1M context, custom statusline. |
-| [`claude/statusline-command.sh`](./claude/statusline-command.sh) | Custom [statusline](https://docs.claude.com/en/docs/claude-code/statusline): model, effort level, git branch, cwd, token usage. Reads guest-side `settings.json` so VM `effortLevel` can differ from the host. |
+- [`lima`](https://lima-vm.io/docs/installation/)
+- [`just`](https://github.com/casey/just#installation)
 
 ## Usage
 
 ```bash
 just                       # list recipes
-just start                 # create or start the VM
-just stop
-just delete                # destroys the disk
-just recreate              # force-delete + start from scratch
-just factory-reset         # wipe user data, keep disk (re-runs provisioning on next start)
-just shell                 # ssh lima-cc-dev (pinned port 2222)
-just sync-claude           # push claude/* into VM ~/.claude/ (no-clobber settings.json)
-just sync-claude --force   # also overwrite settings.json
-just tech-stack-log        # tail async installer log inside VM
-just tech-stack-status     # 'done' or 'running'
+just list                  # list defined VMs
+just start cc-dev          # create or start a VM
+just stop cc-dev
+just shell cc-dev
+just delete cc-dev
+just recreate cc-dev       # force-delete + start fresh
+just factory-reset cc-dev  # wipe user data, keep disk
 ```
 
-## First-time setup inside the VM
-
-Provisioning installs the tools but cannot log you in to interactive services. After the first `just start`, run these inside the VM (`just shell`):
+cc-dev-specific helpers:
 
 ```bash
-# Wait for the async tech-stack installer to finish (bun, node, java, rust, just, worktrunk, ...).
-test -f ~/.tech-stack.done && echo done || echo running
-
-# GitHub CLI: opens a browser-based device flow.
-gh auth login            # pick: GitHub.com, SSH, use existing key, login with web browser
-
-# Claude Code: launches the auth flow on first run.
-claude                   # follow the prompt to sign in
-
-# Verify Worktrunk is on PATH (cargo install puts it under ~/.cargo/bin via the rc lines).
-wt --version
+just sync-claude           # push cc-dev/claude/* to lima-cc-dev:~/.claude/ (auto-runs on start)
+just sync-claude --force   # also overwrite settings.json
+just tech-stack-log        # tail async installer log
+just tech-stack-status     # done | running
 ```
 
-SSH commit signing already works via the forwarded host agent (`forwardAgent: true` in `cc-dev.yaml`); no key setup needed inside the VM.
+## First-time setup of cc-dev
+
+```bash
+cp vms/cc-dev/.env.example vms/cc-dev/.env
+# edit vms/cc-dev/.env: HOST_PATH, GIT_NAME, GIT_EMAIL, GIT_SIGNING_KEY
+just start cc-dev
+```
+
+Inside the VM (`just shell cc-dev`):
+
+```bash
+test -f ~/.tech-stack.done && echo done || echo running   # wait for async installer
+gh auth login                                              # web flow
+claude                                                     # auth flow
+wt --version                                               # worktrunk on PATH
+```
+
+SSH commit signing already works via the forwarded host agent (`forwardAgent: true`).
+
+## Adding a new VM
+
+1. `mkdir -p vms/<name>/scripts`
+2. `vms/<name>/vm.yaml`:
+
+   ```yaml
+   base:
+     - ../../base/base.yaml
+
+   memory: "2GiB"
+
+   param:
+     SOME_TOKEN: ""   # extra creds beyond the base GIT_* keys
+
+   provision:
+     - mode: user
+       file: ./scripts/setup.sh
+   ```
+
+3. `vms/<name>/scripts/setup.sh` - install the tools this VM needs, idempotent.
+4. `vms/<name>/.env.example` - document every key the VM reads.
+5. `cp .env.example .env`, fill in.
+6. `just start <name>`.
+
+The justfile reads `vms/<name>/.env.example` to determine required keys and
+forwards each one to Lima as `--set ".param.<key>=..."`. Inside provision
+scripts they are visible as `PARAM_<key>`.
+
+## Key design points
+
+- 8 GiB RAM + 4 GiB swap on cc-dev (Claude native installer ~3.5 GiB RSS).
+- Debian base (no snapd, no unattended-upgrades, leaner cloud-init).
+- Boot-time service disables (apt-daily, man-db, motd-news, fwupd, networkd-wait-online).
+- virtiofs mounts (when declared).
+- cc-dev pins SSH port `2222` so `ssh lima-cc-dev` stays stable across restarts.
+- cc-dev's tech-stack install runs as a transient systemd unit (`lima-tech-stack`)
+  to outlive cloud-init's ~10 min boot-script timeout.
+- All provision scripts are idempotent: they re-run on every `limactl start`.

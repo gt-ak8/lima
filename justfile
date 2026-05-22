@@ -1,55 +1,79 @@
-set dotenv-load := true
+# Per-VM justfile. All generic recipes take the VM name as their first arg.
+# Per-VM config lives under vms/<name>/ (vm.yaml + .env + scripts + extras).
+# Per-VM .env loaded inside `start` only.
+
+set dotenv-load := false
 
 # List available recipes.
 default:
     @just --list
 
-# Create or start the cc-dev VM (sources .env, forwards values to Lima).
-start:
-    @if [ -n "$(limactl list -q cc-dev 2>/dev/null)" ]; then \
-      limactl start cc-dev; \
-    else \
-      [ -n "${HOST_PATH:-}" ]        || { echo "ERROR: HOST_PATH not set (copy .env.example to .env)"; exit 1; }; \
-      [ -n "${GIT_NAME:-}" ]         || { echo "ERROR: GIT_NAME not set"; exit 1; }; \
-      [ -n "${GIT_EMAIL:-}" ]        || { echo "ERROR: GIT_EMAIL not set"; exit 1; }; \
-      [ -n "${GIT_SIGNING_KEY:-}" ]  || { echo "ERROR: GIT_SIGNING_KEY not set"; exit 1; }; \
-      limactl start --name=cc-dev cc-dev.yaml \
-        --set ".param.HOST_PATH = \"$HOST_PATH\"" \
-        --set ".param.GIT_NAME = \"$GIT_NAME\"" \
-        --set ".param.GIT_EMAIL = \"$GIT_EMAIL\"" \
-        --set ".param.GIT_SIGNING_KEY = \"$GIT_SIGNING_KEY\""; \
+# List the VMs defined in this repo.
+list:
+    @ls vms/ 2>/dev/null
+
+# Create or start a VM (sources vms/<vm>/.env, syncs claude/ if present).
+start vm:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    VM='{{vm}}'
+    DIR="vms/$VM"
+    [ -d "$DIR" ]              || { echo "ERROR: $DIR not found"; exit 1; }
+    [ -f "$DIR/vm.yaml" ]      || { echo "ERROR: $DIR/vm.yaml missing"; exit 1; }
+    [ -f "$DIR/.env" ]         || { echo "ERROR: $DIR/.env missing (copy .env.example)"; exit 1; }
+    [ -f "$DIR/.env.example" ] || { echo "ERROR: $DIR/.env.example missing"; exit 1; }
+
+    set -a; . "$DIR/.env"; set +a
+
+    if [ -n "$(limactl list -q "$VM" 2>/dev/null)" ]; then
+      limactl start "$VM"
+    else
+      # Required keys: anything assigned at top-level in .env.example.
+      # `${!key}` is bash indirect expansion; missing values fail loud.
+      set_args=()
+      while IFS= read -r line; do
+        key=$(printf '%s\n' "$line" | grep -oE '^[A-Z_][A-Z0-9_]*=' | tr -d '=')
+        [ -n "$key" ] || continue
+        val="${!key:-}"
+        [ -n "$val" ] || { echo "ERROR: $key not set in $DIR/.env"; exit 1; }
+        set_args+=(--set ".param.$key = \"$val\"")
+      done < "$DIR/.env.example"
+      limactl start --name="$VM" "$DIR/vm.yaml" "${set_args[@]}"
     fi
-    just sync-claude
 
-# Stop the VM.
-stop:
-    limactl stop cc-dev
+    if [ -d "$DIR/claude" ] && [ -x "$DIR/scripts/sync-claude-config.sh" ]; then
+      "$DIR/scripts/sync-claude-config.sh" "lima-$VM"
+    fi
 
-# Delete the VM (destroys the disk).
-delete:
-    limactl delete cc-dev
+# Stop a VM.
+stop vm:
+    limactl stop {{vm}}
+
+# Delete a VM (destroys the disk).
+delete vm:
+    limactl delete {{vm}}
 
 # Force-delete and recreate from scratch.
-recreate:
-    limactl delete -f cc-dev
-    just start
+recreate vm:
+    limactl delete -f {{vm}}
+    just start {{vm}}
 
 # Wipe user data but keep the disk; re-runs provisioning on next start.
-factory-reset:
-    limactl factory-reset cc-dev
+factory-reset vm:
+    limactl factory-reset {{vm}}
 
-# SSH into the VM.
-shell:
-    ssh lima-cc-dev
+# SSH into a VM.
+shell vm:
+    ssh lima-{{vm}}
 
-# Sync host claude/* into the VM's ~/.claude/. Pass --force to overwrite settings.json.
+# Sync cc-dev's claude/* into the guest's ~/.claude/. Pass --force to overwrite settings.json.
 sync-claude *args:
-    ./scripts/sync-claude-config.sh {{ args }}
+    ./vms/cc-dev/scripts/sync-claude-config.sh {{ args }}
 
-# Tail the async tech-stack installer log inside the VM.
+# Tail the cc-dev async tech-stack installer log.
 tech-stack-log:
     ssh lima-cc-dev 'tail -f ~/.tech-stack.log'
 
-# Print 'done' or 'running' for the async tech-stack installer.
+# Print 'done' or 'running' for the cc-dev async tech-stack installer.
 tech-stack-status:
     ssh lima-cc-dev 'test -f ~/.tech-stack.done && echo done || echo running'

@@ -1,0 +1,39 @@
+# Shared base template for all VMs in this repo.
+#
+# Inherits the Debian 12 image-only template (no _default/mounts auto-mount of
+# the host home read-only). Per-VM yaml files extend this via `base:` and add
+# their own params/mounts/provision steps.
+#
+# Lima merges base templates recursively; for `provision:` and `probes:` lists
+# the base entries are PREPENDED, so common bootstrap runs before VM-specific
+# steps.
+base:
+  - template:_images/debian-12
+
+# Reasonable default for small agent VMs. cc-dev overrides to 8GiB for the
+# claude native installer (allocates ~3.5 GiB RSS).
+memory: "4GiB"
+
+# Param keys common to all VMs. Per-VM yamls extend this map.
+# Values come from vms/<name>/.env via `limactl start --set` in the justfile.
+# Exposed to provision scripts as PARAM_<key>.
+param:
+  GIT_NAME: ""
+  GIT_EMAIL: ""
+  GIT_SIGNING_KEY: ""
+
+user:
+  name: "dev"
+  home: "/home/dev"
+
+ssh:
+  forwardAgent: true
+  loadDotSSHPubKeys: false
+
+mountType: "virtiofs"
+
+provision:
+  - mode: system
+    file: ./provision.sh
+  - mode: user
+    file: ./user-provision.sh
