@@ -32,13 +32,22 @@ start vm:
       # `${!key}` is bash indirect expansion; missing values fail loud.
       set_args=()
       while IFS= read -r line; do
-        key=$(printf '%s\n' "$line" | grep -oE '^[A-Z_][A-Z0-9_]*=' | tr -d '=')
-        [ -n "$key" ] || continue
+        [[ "$line" =~ ^([A-Z_][A-Z0-9_]*)= ]] || continue
+        key="${BASH_REMATCH[1]}"
         val="${!key:-}"
         [ -n "$val" ] || { echo "ERROR: $key not set in $DIR/.env"; exit 1; }
         set_args+=(--set ".param.$key = \"$val\"")
       done < "$DIR/.env.example"
-      limactl start --name="$VM" "$DIR/vm.yaml" "${set_args[@]}"
+
+      # Render vm.yaml -> $DIR/.lima.yaml with @@BASE@@ replaced by an absolute
+      # file:// URL. Must live inside $DIR so Lima resolves provision script
+      # paths (`./scripts/setup.sh`) against the VM's own directory.
+      # Lima rejects `../` in relative base locators, and `--set .base` runs
+      # after base merging, so neither shortcut works.
+      BASE_URL="file://$(cd base && pwd)/base.yaml"
+      RENDERED="$DIR/.lima.yaml"
+      sed "s|@@BASE@@|$BASE_URL|g" "$DIR/vm.yaml" > "$RENDERED"
+      limactl start --name="$VM" "$RENDERED" "${set_args[@]}"
     fi
 
     if [ -d "$DIR/claude" ] && [ -x "$DIR/scripts/sync-claude-config.sh" ]; then

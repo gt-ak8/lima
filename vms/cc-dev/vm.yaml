@@ -1,11 +1,15 @@
 # cc-dev: full-fat dev VM with Claude Code and the async tech stack.
 # Inherits the shared base (common CLI toolkit, git identity, shell wiring)
-# from ../../base/base.yaml and adds the dev-stack on top.
+# and adds the dev-stack on top.
+#
+# @@BASE@@ is a placeholder replaced by the justfile with an absolute file://
+# URL to base/base.yaml (Lima rejects `../` in relative locators, and `--set`
+# happens after base merging so it can't inject the locator).
 #
 # Base provisions are PREPENDED to ours by Lima merging, so the order is:
 #   base system -> dev-stack-system -> base user -> dev-stack-user
 base:
-  - ../../base/base.yaml
+  - "@@BASE@@"
 
 # Claude native installer allocates ~3.5 GiB RSS (Bun mmaps a large heap).
 # 4 GiB OOM-killed it during provisioning; 8 GiB is comfortable.

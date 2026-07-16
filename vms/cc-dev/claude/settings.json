@@ -1,15 +1,34 @@
 {
+  "env": {
+    "CLAUDE_CODE_DISABLE_1M_CONTEXT": "1"
+  },
   "permissions": {
     "defaultMode": "bypassPermissions"
   },
-  "skipDangerousModePermissionPrompt": true,
-  "autoMemoryEnabled": false,
-  "awaySummaryEnabled": false,
-  "env": {
-    "CLAUDE_CODE_DISABLE_1M_CONTEXT": "1"
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "c=$(jq -r \".tool_input.command\"); if printf \"%s\" \"$c\" | grep -qE \"(^|[^[:alnum:]_])git[[:space:]]+worktree([[:space:]]|$)\"; then printf \"%s\" \"{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"PreToolUse\\\",\\\"permissionDecision\\\":\\\"deny\\\",\\\"permissionDecisionReason\\\":\\\"Do not use git worktree directly. Use the wt CLI (worktrunk) to manage worktrees, e.g. wt add / wt list / wt remove.\\\"}}\"; fi"
+          }
+        ]
+      }
+    ]
   },
   "statusLine": {
     "type": "command",
     "command": "bash /home/dev/.claude/statusline-command.sh"
-  }
+  },
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": true
+  },
+  "effortLevel": "high",
+  "awaySummaryEnabled": false,
+  "autoMemoryEnabled": false,
+  "skipDangerousModePermissionPrompt": true,
+  "theme": "auto",
+  "tui": "default"
 }

@@ -1,7 +1,7 @@
 #!/bin/bash
 # cc-dev user-mode add-ons (runs AFTER base/user-provision.sh).
-# Installs Claude Code, sets up the headless gnome-keyring user unit, wires
-# tech-stack rc lines, then stages the async tech-stack installer.
+# Installs Claude Code, wires tech-stack rc lines, then stages the async
+# tech-stack installer.
 #
 # NOT -e: a single failure (e.g. claude OOM, npm hiccup) must not abort the
 # rest of the setup.
@@ -15,64 +15,32 @@ if ! command -v claude >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/claude" ]; th
   curl -fsSL https://claude.ai/install.sh | bash || echo "WARN: claude install failed, skipping"
 fi
 
-# --- secret service (gnome-keyring, headless) ----------------------------
-# keytar-based CLIs (dust, vscode-cli, ...) need a running Secret Service
-# on the user's dbus bus. The VM is headless and dev logs in via SSH key,
-# so pam_gnome_keyring never gets a password to unlock with. We run
-# gnome-keyring-daemon as a user systemd unit and unlock at startup with
-# an empty password: same security as a flat on-disk file, but speaks
-# org.freedesktop.secrets so keytar clients work.
-#
-# `--components=secrets` deliberately excludes the ssh-agent component;
-# otherwise gnome-keyring would hijack SSH_AUTH_SOCK and break the
-# forwarded host SSH agent used for commit signing.
-#
-# Bootstrap the `login` keyring file BEFORE starting the unit. `--unlock`
-# only opens an existing file; it does NOT create one. On a fresh user
-# the file is missing, so the daemon comes up with zero collections and
-# keytar clients (dust) hit `Object does not exist at path
-# /collection/login` the first time they try to store a token. The
-# Secret Service API path that would normally create it (CreateCollection)
-# triggers a graphical password prompt which a headless VM has no way to
-# answer, so we write the file directly in gnome-keyring's plain-INI
-# empty-password format.
-mkdir -p "$HOME/.local/share/keyrings"
-chmod 700 "$HOME/.local/share/keyrings"
-if [ ! -f "$HOME/.local/share/keyrings/login.keyring" ]; then
-  NOW=$(date +%s)
-  cat >"$HOME/.local/share/keyrings/login.keyring" <<KEYRING
-[keyring]
-display-name=login
-ctime=$NOW
-mtime=$NOW
-lock-on-idle=false
-lock-after=false
-KEYRING
-  chmod 600 "$HOME/.local/share/keyrings/login.keyring"
-  printf 'login' >"$HOME/.local/share/keyrings/default"
-  chmod 600 "$HOME/.local/share/keyrings/default"
+# --- secret service (keyring) --------------------------------------------
+# keytar-based CLIs (e.g. `dust`) need org.freedesktop.secrets on the session
+# D-Bus. This headless VM has no desktop session to start/unlock a keyring, so
+# revive gnome-keyring on every login from ~/.zprofile in "login" mode with an
+# empty password (acceptable: personal isolated dev box). Login mode also
+# CREATES + persists the `login` keyring on first run; that keyring is the
+# default collection keytar/libsecret writes into. Without it `dust login`
+# fails with "Object does not exist at path .../collection/login" even though
+# the secrets service is up. The block is guarded so repeated logins/subshells
+# never spawn duplicate daemons, and the grep marker below keeps provisioning
+# from appending it twice.
+touch ~/.zprofile
+grep -q 'org.freedesktop.secrets' ~/.zprofile || cat >>~/.zprofile <<'ZPROFILE'
+# Provide org.freedesktop.secrets (Secret Service) for keytar-based CLIs such as `dust`.
+# Headless VM has no desktop session, so start gnome-keyring in login mode with an empty
+# password (personal isolated dev box). Login mode creates the `login` keyring on first
+# boot (the default collection keytar needs) and unlocks it on later logins.
+if [ -n "$DBUS_SESSION_BUS_ADDRESS" ] && command -v gnome-keyring-daemon >/dev/null 2>&1; then
+  if ! dbus-send --session --print-reply --dest=org.freedesktop.DBus \
+       /org/freedesktop/DBus org.freedesktop.DBus.NameHasOwner \
+       string:org.freedesktop.secrets 2>/dev/null | grep -q 'boolean true'; then
+    # NUL-terminated empty password; login mode prints nothing on success.
+    printf '\0' | gnome-keyring-daemon --daemonize --login >/dev/null 2>&1
+  fi
 fi
-
-mkdir -p "$HOME/.config/systemd/user"
-cat >"$HOME/.config/systemd/user/gnome-keyring-daemon.service" <<'KEYUNIT'
-[Unit]
-Description=GNOME Keyring daemon (secrets only, headless unlock)
-
-[Service]
-Type=simple
-ExecStart=/bin/sh -c 'printf "" | exec /usr/bin/gnome-keyring-daemon --foreground --components=secrets --unlock'
-Restart=on-failure
-
-[Install]
-WantedBy=default.target
-KEYUNIT
-
-# enable-linger ran in dev-system-deps.sh, so user@1000.service should
-# already be up. `|| true` keeps provisioning resilient if the user
-# manager isn't reachable on first boot.
-export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-systemctl --user daemon-reload || true
-systemctl --user enable --now gnome-keyring-daemon.service || true
+ZPROFILE
 
 # =========================================================================
 # Tech stack — keep this as the LAST section.
@@ -148,10 +116,8 @@ if [ -s "$NVM_DIR/nvm.sh" ]; then
     nvm alias default 'lts/*' || true
   fi
   # Global npm CLIs that need node. Installed under the active nvm prefix
-  # so they follow node LTS upgrades. dust uses gnome-keyring set up above;
-  # copilot uses gh auth.
+  # so they follow node LTS upgrades. copilot uses gh auth.
   if command -v npm >/dev/null 2>&1; then
-    command -v dust    >/dev/null 2>&1 || npm install -g @dust-tt/dust-cli || echo "WARN: dust-cli install failed"
     command -v copilot >/dev/null 2>&1 || npm install -g @github/copilot   || echo "WARN: copilot cli install failed"
   fi
   set -u

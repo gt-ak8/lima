@@ -39,6 +39,16 @@ for f in "$SRC"/*.md; do
   scp -q "$f" "$HOST:.claude/$(basename "$f")"
 done
 
+# skills/: mirror the whole dir (user-defined skills are config-as-code).
+# Copies the tree as-is; existing guest skills with the same name are
+# overwritten, others are left untouched (no --delete).
+# rsync avoids the scp `src/.` idiom, which breaks under OpenSSH >=9's
+# SFTP-based scp ("stat remote: No such file or directory").
+if [ -d "$SRC/skills" ]; then
+  ssh "$HOST" 'mkdir -p ~/.claude/skills'
+  rsync -rlpt "$SRC/skills/" "$HOST:.claude/skills/"
+fi
+
 # settings.json: seed only if missing on the guest, unless --force
 if [ -f "$SRC/settings.json" ]; then
   if [ "$FORCE" = "1" ] || ! ssh "$HOST" 'test -f ~/.claude/settings.json'; then
